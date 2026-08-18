@@ -98,7 +98,7 @@ O comando de execução foi mantido oculto, utilzando a técnica de fileless, de
 
 ## Resposta ao Incidente (ações recomendadas) — Capítulo 1
 
-- Isolar o host FYODOR-L da rede, para cortar a comunicação com o C2
+- Isolar o host FYODOR-L da rede
 - Bloquear o IP 45.77.53.176 no firewall/proxy (todas as portas usadas: 443 e 80)
 - Capturar memória do processo PowerShell antes de qualquer reinicialização (pode conter o payload decodificado ainda em execução)
 - Extrair e limpar a chave de registro HKLM:\Software\Microsoft\Network (valor "debug")
