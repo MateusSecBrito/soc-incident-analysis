@@ -103,7 +103,7 @@ O atacante criou uma conta local (`svcvnc`) com credencial própria e a incluiu 
 | Create Account: Local Account | T1136.001 | Criação da conta `svcvnc` |
 | Account Manipulation | T1098 | Inclusão nos grupos `Users` e `Administrators` |
 
-## Resposta ao Incidente (ações recomendadas) — Capítulo 1
+## Resposta ao Incidente (ações recomendadas)
 
 - Isolar o host FYODOR-L da rede (Caso não tenha sido feito)
 - Desabilitar/remover a conta svcvnc
