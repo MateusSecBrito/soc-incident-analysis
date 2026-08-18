@@ -2,7 +2,6 @@
 
 **Dataset:** Splunk BOTSv3 (cenário Frothly / grupo Taedonggang)
 **Host comprometido:** FYODOR-L.froth.ly
-**Data do incidente:** 20/08/2018
 
 ## Objetivo
 
@@ -10,26 +9,29 @@ Identificar como o atacante estabeleceu comunicação com sua infraestrutura de 
 
 ## Hipótese inicial
 
-Atacantes frequentemente usam PowerShell para se comunicar com servidores C2, muitas vezes ofuscando o comando em Base64 para evadir detecção baseada em assinatura.
+Atacantes, normalmente, utilizam PowerShell para se comunicar com o servidor C2, muitas vezes escondendo os comandos em Base64 para tentar escapar de detecções. 
 
 ## Investigação
 
 ### 1. Busca inicial por indício de ofuscação
 
-```spl
-host="FYODOR-L" FromBase64String
-```
-
-`FromBase64String` é o método .NET usado por PowerShell para decodificar Base64 — sua presença no log é um forte indicador de comando ofuscado.
+<img width="281" height="71" alt="image" src="https://github.com/user-attachments/assets/1f0bc98e-9bb3-4c11-a1bb-044984b2698d" />
 
 **Resultado:** 22 eventos.
 
+FromBase64 é um método de decodificação bastante utilizado por atacantes.<br> 
+A ordem de eventos costuma funcionar assim: <br>
+1 - O atacante cria um código malicioso e o codifica com base64 para tentar passar despercebido<br>
+2 - O código chega ao dispositivo da vítima<br>
+3 - Um script decodifica o código utilizando FromBase64<br>
+4 - O código é executado<br>
+
+
 ### 2. Identificação do sourcetype relevante
 
-```spl
-host="FYODOR-L" FromBase64String
-| stats count by sourcetype
-```
+<img width="370" height="74" alt="image" src="https://github.com/user-attachments/assets/2c780671-3be6-49b8-a66d-1df99c99e267" />
+
+
 
 | sourcetype | count |
 |---|---|
@@ -38,13 +40,13 @@ host="FYODOR-L" FromBase64String
 | winhostmon | 10 |
 | xmlwineventlog:microsoft-windows-sysmon/operational | 4 |
 
-O log específico do PowerShell (`WinEventLog:Microsoft-Windows-PowerShell/Operational`) é o único que registra o texto completo do comando executado — os demais são eventos de auditoria/monitoramento sem esse nível de detalhe.
+O log específico do PowerShell (`WinEventLog:Microsoft-Windows-PowerShell/Operational`) é o mais importante nesse caso, pois registra o comando completo executado.
 
 ### 3. Análise do comando decodificado
 
-```spl
-host="FYODOR-L" FromBase64String sourcetype="WinEventLog:Microsoft-Windows-PowerShell/Operational"
-```
+<img width="630" height="99" alt="image" src="https://github.com/user-attachments/assets/2f6bbf29-282e-44cc-8715-c48bed049e6a" />
+
+**Resultado:** 6 eventos. <br>
 
 Um dos 6 eventos revela o mecanismo de execução:
 
@@ -53,37 +55,36 @@ IEX ([Text.Encoding]::UNICODE.GetString([Convert]::FromBase64String((gp HKLM:\So
 ```
 
 **Leitura do comando (de dentro para fora):**
-1. `gp HKLM:\Software\Microsoft\Network debug` — lê o valor `debug` de uma chave do registro do Windows.
-2. `[Convert]::FromBase64String(...)` — decodifica esse valor de Base64 para bytes.
-3. `[Text.Encoding]::UNICODE.GetString(...)` — converte os bytes em texto legível (script PowerShell real).
-4. `IEX` (`Invoke-Expression`) — executa esse texto como código.
+1. `gp HKLM:\Software\Microsoft\Network debug`: lê o valor `debug` de uma chave do registro do Windows.
+2. `[Convert]::FromBase64String(...)`: decodifica esse valor de Base64 para bytes.
+3. `[Text.Encoding]::UNICODE.GetString(...)`: converte os bytes em texto legível (script PowerShell real).
+4. `IEX` (`Invoke-Expression`):  executa esse texto como código.
 
-Isso caracteriza uma técnica de **execução sem arquivo (fileless)**: o payload malicioso fica armazenado no registro do Windows em vez de um arquivo em disco, dificultando detecção por antivírus tradicional.
+Então, basicamente, o atacante escondeu um payload no registro do windows em vez de um arquivo em disco, dificultando ainda mais a detecção. Essa técnica é conhecida como **fileless** (execução sem arquivo).
 
-Dos demais eventos, foram decodificados dois canais distintos usados pelo atacante:
+Dos outros eventos, foram decodificados dois canais distintos usados pelo atacante:
 
 - `https://45.77.53.176:443` — canal de conexão inicial (HTTPS).
-- Três caminhos HTTP no mesmo servidor: `/admin/get.php`, `/news.php`, `/login/process.php`.
+- Três caminhos HTTP no mesmo servidor: **/admin/get.php**, **/news.php**, **/login/process.php**.
 
 ### 4. Determinando o endpoint C2 principal
 
-A contagem dentro dos 6 eventos filtrados por `FromBase64String` mostrou um empate entre `/admin/get.php` e `/news.php` (2 ocorrências cada). Esse filtro, porém, só captura o momento em que o comando *ainda estava sendo decodificado* — não reflete quantas vezes o endpoint foi de fato contatado ao longo do ataque.
+A contagem dentro dos 6 eventos filtrados por FromBase64String mostrou um empate entre **/admin/get.php** e **/news.php** (Cada um acessado duas vezes). Porém, esse filtro só captura o momento em que o comando ainda estava decodificado, o endpoint ainda foi contatado outras vezes durante o ataque.
 
 Removendo a restrição de `FromBase64String` e buscando diretamente pelas URLs:
 
-```spl
-host="FYODOR-L" sourcetype="WinEventLog:Microsoft-Windows-PowerShell/Operational" ("admin/get.php" OR "news.php" OR "login/process.php")
-```
+<img width="631" height="95" alt="image" src="https://github.com/user-attachments/assets/5f66d1fa-be48-4a70-9e28-19ba647d5526" />
 
-**Resultado:** `/admin/get.php` aparece em 5 execuções distintas, nos horários `10:01:44`, `10:07:07`, `10:11:02`, `10:15:28` e `11:32:14` — bem mais frequente que os outros dois caminhos, confirmando-o como o endpoint de comunicação C2 principal.
+
+**Resultado:** `/admin/get.php` aparece em 5 execuções distintas, no intervalo de 1h30 (10:01–11:32), bem mais frequente que os outros dois, isso confirma o caminho como c2 principal.
 
 ## Conclusão
 
-O atacante estabeleceu um canal de comunicação persistente com o servidor `45.77.53.176`, combinando:
+O atacante estabeleceu comunicação com o servidor `45.77.53.176`, combinando:
 - uma conexão inicial via **HTTPS (porta 443)**;
-- comunicação operacional continuada via **HTTP**, batendo repetidamente no endpoint `/admin/get.php` ao longo de aproximadamente 1h30 (10:01–11:32).
+- comunicação operacional contínua via **HTTP**, acessando repetidamente o endpoint `/admin/get.php` ao longo de aproximadamente 1h30 (10:01–11:32).
 
-O comando de execução foi mantido oculto dentro do registro do Windows, decodificado e executado em memória via PowerShell — evitando artefatos em disco que pudessem ser detectados por varreduras de antivírus convencionais.
+O comando de execução foi mantido oculto, utilzando a técnica de fileless, dentro do registro do Windows, decodificado e executado em memória via PowerShell 
 
 ## Mapeamento MITRE ATT&CK
 
