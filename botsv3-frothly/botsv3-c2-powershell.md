@@ -95,6 +95,11 @@ O comando de execução foi mantido oculto, utilzando a técnica de fileless, de
 | Modify Registry | T1112 | Payload armazenado em chave do registro do Windows |
 | Application Layer Protocol: Web Protocols | T1071.001 | Comunicação C2 via HTTP/HTTPS |
 
-## Lição de investigação
 
-Filtrar por um termo técnico específico (como `FromBase64String`) é eficaz para localizar o primeiro indício de um comportamento malicioso, mas pode limitar a visão do quadro completo. Uma vez identificado o padrão (URL, IP, processo), o passo seguinte é remover esse filtro e buscar diretamente pela evidência (a URL, neste caso) em toda a janela de tempo relevante — revelando o verdadeiro volume e a real frequência da atividade.
+## Resposta ao Incidente (ações recomendadas) — Capítulo 1
+
+- Isolar o host FYODOR-L da rede, para cortar a comunicação com o C2
+- Bloquear o IP 45.77.53.176 no firewall/proxy (todas as portas usadas: 443 e 80)
+- Capturar memória do processo PowerShell antes de qualquer reinicialização (pode conter o payload decodificado ainda em execução)
+- Extrair e limpar a chave de registro HKLM:\Software\Microsoft\Network (valor "debug")
+- Habilitar/reforçar logging de PowerShell (Script Block Logging) para capturar comandos ofuscados em outros hosts
